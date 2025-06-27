@@ -1,7 +1,27 @@
-# Virtual environment
+# Environments
+.env
+.venv
+env/
+venv/
 llm-env/
+
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+*.so
 
-# Environment variables
-.env
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# IDE / Editor specific
+.idea/
+.vscode/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
