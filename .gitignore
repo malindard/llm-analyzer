@@ -1,0 +1,7 @@
+# Virtual environment
+llm-env/
+__pycache__/
+*.pyc
+
+# Environment variables
+.envg
