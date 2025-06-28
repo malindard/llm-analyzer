@@ -1,74 +1,54 @@
-from flask import Flask, jsonify
 import mysql.connector
 import requests
 import json
 import logging
-import re  # Regular expressions
 import os
+from flask import Flask, jsonify, g
+from prompt_builder import build_prompt
+from pathlib import Path
 from dotenv import load_dotenv
 
-# Muat variabel lingkungan dari file .env
-load_dotenv() 
+# Tentukan path ke file .env
+dotenv_path = Path(__file__).resolve().parent / '.env'
+load_dotenv(dotenv_path=dotenv_path)
 
 # Inisialisasi Flask app
 app = Flask(__name__)
 
 # Konfigurasi dari environment variables
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-MODEL = os.getenv("LLM_MODEL", "mistralai/mistral-small-3.2-24b-instruct:free")
-
-# Fungsi koneksi ke database
-def get_db_connection():
-    return mysql.connector.connect(
-        host=os.getenv("DB_HOST", "127.0.0.1"),
-        user=os.getenv("DB_USER", "root"),
-        password=os.getenv("DB_PASSWORD", ""),
-        database=os.getenv("DB_NAME", "phishing-database")
-    )
-
-# Fungsi menyusun prompt untuk LLM hanya dengan 'form'
-def build_prompt(data):
-    def limit_text(arr, max_len=400):
-        """Memotong teks jika panjangnya lebih dari max_len"""
-        if not isinstance(arr, list):
-            return ""
-        joined = "\n".join(arr)
-        return (joined[:max_len] + '...') if len(joined) > max_len else joined
-
-    # Menggunakan semua bagian yang relevan dengan batas panjang yang berbeda
-    titles = limit_text(data.get("titles", []), max_len=200)
-    heads = limit_text(data.get("heads", []), max_len=500)
-    forms = limit_text(data.get("forms", []), max_len=500)
-    scripts = limit_text(data.get("scripts", []), max_len=500)
-
-    full_content = (
-        f"Judul Halaman (Title):\n{titles}\n\n"
-        f"Bagian Head:\n{heads}\n\n"
-        f"Formulir (Forms):\n{forms}\n\n"
-        f"Skrip (Scripts):\n{scripts}"
-    ).strip()
-
-    return [
-        {"role": "system", "content": (
-            "Anda adalah seorang pakar keamanan siber dan analis konten web. "
-            "Tugas utama Anda adalah menganalisis data yang diekstrak dari halaman web dan memberikan dua hal: "
-            "1. Ringkasan singkat mengenai isi dan tujuan halaman web tersebut. "
-            "2. Analisis risiko phishing: Tentukan apakah halaman tersebut berpotensi phishing atau tidak, beserta alasan yang jelas dan ringkas. "
-            "Seluruh respons Anda harus dalam Bahasa Indonesia yang baku, jelas, dan mudah dipahami."
-            "Hindari penggunaan bahasa campur, singkatan tidak resmi, atau rekomendasi tambahan. "
-            "Fokus pada ringkasan dan analisis phishing saja."
-        )},
-        {"role": "user", "content": (
-            f"Berikut adalah data yang diekstrak dari sebuah halaman web:\n\n{full_content}\n\n"
-            "Mohon berikan analisis Anda dalam format berikut, selalu dalam Bahasa Indonesia:\n\n"
-            "Ringkasan Halaman:\n[Ringkasan singkat tentang isi halaman]\n\n"
-            "Analisis Phishing:\n[Kesimpulan apakah halaman ini phishing atau bukan, diikuti dengan alasan-alasan utama yang mendukung kesimpulan tersebut.]"
-        )}
-    ]
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
+MODEL = os.getenv("LLM_MODEL", "deepseek/deepseek-chat-v3-0324:free")
 
 # Konfigurasi logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Validasi dan logging API Key saat startup
+if not OPENROUTER_API_KEY:
+    logger.critical("FATAL: OPENROUTER_API_KEY tidak ditemukan. Aplikasi akan berhenti.")
+    raise ValueError("OPENROUTER_API_KEY tidak ditemukan. Pastikan variabel lingkungan sudah diatur dengan benar di file .env")
+else:
+    # Log versi tersamar dari key untuk verifikasi
+    masked_key = f"{OPENROUTER_API_KEY[:5]}...{OPENROUTER_API_KEY[-4:]}"
+    logger.info(f"OpenRouter API Key loaded successfully. (Key: {masked_key})")
+
+# Fungsi untuk mendapatkan koneksi database, menggunakan 'g' untuk cache per-request
+def get_db():
+    if 'db' not in g:
+        g.db = mysql.connector.connect(
+            host=os.getenv("DB_HOST", "127.0.0.1"),
+            user=os.getenv("DB_USER", "root"),
+            password=os.getenv("DB_PASSWORD", ""),
+            database=os.getenv("DB_NAME", "phishing-database")
+        )
+    return g.db
+
+# Fungsi untuk menutup koneksi database di akhir request
+@app.teardown_appcontext
+def teardown_db(exception):
+    db = g.pop('db', None)
+    if db is not None:
+        db.close()
 
 # Endpoint LLM
 @app.route("/llm-analyze/<int:id>", methods=["GET"])
@@ -76,19 +56,21 @@ def analyze(id):
     logger.info(f"Received request for analysis with id: {id}")
     try:
         # Koneksi ke database dan ambil data
-        conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        db = get_db()
+        cursor = db.cursor(dictionary=True)
         cursor.execute("SELECT extracted_content FROM phishings WHERE id = %s", (id,))
         row = cursor.fetchone()
-        cursor.close()
-        conn.close()
+        cursor.close() # Tutup cursor segera setelah digunakan
 
         if not row or not row["extracted_content"]:
             logger.error(f"Extracted content not found for id {id}")
             return jsonify({"error": "extracted_content kosong atau tidak ditemukan"}), 404
 
         extracted_raw = row["extracted_content"]
-        logger.info(f"Extracted raw content: {extracted_raw}")
+
+        # Log pratinjau konten
+        log_content_preview = (extracted_raw[:200] + '...') if len(extracted_raw) > 200 else extracted_raw
+        logger.info(f"Extracted raw content (preview): {log_content_preview}")
 
         # Decode JSON, tangani kemungkinan double-encoding
         try:
@@ -101,7 +83,7 @@ def analyze(id):
             logger.error(f"JSON decode error for id {id}: {str(e)}")
             return jsonify({"error": f"Gagal mem-parsing extracted_content: {str(e)}"}), 500
         
-        # Setelah decode, pastikan kita mendapatkan dictionary untuk diproses
+        # Setelah decode, pastikan mendapatkan dictionary untuk diproses
         if not isinstance(data_dict, dict):
             error_msg = f"Konten yang di-parse bukan dictionary (tipe: {type(data_dict).__name__}). Tidak dapat diproses."
             logger.error(error_msg)
@@ -117,14 +99,23 @@ def analyze(id):
             headers={
                 "Authorization": f"Bearer {OPENROUTER_API_KEY}",
                 "Content-Type": "application/json",
-                "HTTP-Referer": "http://localhost",
-                "X-Title": "LLM Analyzer"
+                "HTTP-Referer": "http://localhost", # Referer bisa penting untuk beberapa API
+                "X-Title": "Phishing LLM Analyzer" # Nama aplikasi Anda
             },
             json={
                 "model": MODEL,
                 "messages": prompt
-            }
+            },
+            timeout=90 # Tambahkan timeout untuk request yang lama
         )
+
+        # Periksa status code HTTP sebelum mencoba parse JSON
+        if response.status_code != 200:
+            logger.error(f"LLM API request failed with status {response.status_code}: {response.text}")
+            return jsonify({
+                "status": "error",
+                "message": f"LLM API request failed with status {response.status_code}"
+            }), response.status_code
 
         result = response.json()
         logger.info(f"LLM Response for id {id}: {json.dumps(result, indent=2)}")
@@ -134,7 +125,6 @@ def analyze(id):
             logger.error(f"LLM API Error for id {id}: {error_message}")
             return jsonify({"status": "error", "message": f"LLM Error: {error_message}"}), 500
         
-        # Ambil insight dari respons dan kirim dengan kunci yang benar
         insight = result.get("choices", [{}])[0].get("message", {}).get("content", "No insight from LLM.")
 
         return jsonify({
@@ -142,11 +132,17 @@ def analyze(id):
             "llm_insight": insight
         })
 
+    except mysql.connector.Error as db_err:
+        logger.error(f"Database error: {str(db_err)}")
+        return jsonify({"status": "error", "message": "Database error"}), 500
+    except requests.exceptions.RequestException as req_err:
+        logger.error(f"Request to LLM API failed: {str(req_err)}")
+        return jsonify({"status": "error", "message": "Failed to connect to LLM service"}), 500
     except Exception as e:
-        logger.error(f"Error occurred: {str(e)}")
+        logger.error(f"An unexpected error occurred: {str(e)}", exc_info=True)
         return jsonify({
             "status": "error",
-            "message": f"Prompt error: {str(e)}"
+            "message": "An unexpected server error occurred."
         }), 500
 
 # Route utama untuk cek status
