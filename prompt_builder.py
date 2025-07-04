@@ -23,13 +23,17 @@ def build_prompt(data: Dict[str, Any]) -> List[Dict[str, str]]:
         {"role": "system", "content": (
             "Anda adalah seorang pakar keamanan siber dan analis konten web. "
             "Tugas utama Anda adalah menganalisis data yang diekstrak dari halaman web dan memberikan dua hal: "
+            "1. PHISHING atau TIDAK PHISHING?"
             "1. Ringkasan singkat mengenai isi dan tujuan halaman web tersebut. "
             "2. Analisis risiko phishing..."
+            "3. Hasil akhir prediksi menurut Anda dan alasannya"
         )},
         {"role": "user", "content": (
             f"Berikut adalah data yang diekstrak dari sebuah halaman web:\n\n{full_content}\n\n"
             "Mohon berikan analisis Anda dalam format berikut, selalu dalam Bahasa Indonesia:\n\n"
+            "Prediksi:..."
             "Ringkasan Halaman:\n[...]\n\n"
             "Analisis Phishing:\n[...]"
+            "Hasil Akhir prediksi dari LLM:\n[...]"
         )}
     ]
