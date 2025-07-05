@@ -3,7 +3,7 @@ import json
 import logging
 import os
 from flask import Flask, jsonify, request
-from prompt_builder import build_prompt
+from prompt_builder import build_url_prompt, build_email_prompt
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -35,7 +35,11 @@ else:
 @app.route("/llm-analyze", methods=["POST"])
 def llm_analyze():
     try:
-        content = request.json.get("content", {})
+        content = request.json.get("context", {})
+
+        if not isinstance(content, dict):
+            logger.error("Konten yang dikirim bukan dictionary.")
+            return jsonify({"status": "error", "message": "Konten harus berupa dictionary"}), 400
 
         if not content:
             logger.error("Konten kosong atau tidak dikirim.")
@@ -56,7 +60,12 @@ def llm_analyze():
             return jsonify({"status": "error", "message": "Konten harus berupa dictionary"}), 400
 
         # Generate prompt untuk LLM
-        prompt = build_prompt(content)
+        input_type = content.get("input_type", "").lower()
+        if input_type == "email":
+            prompt = build_email_prompt(content)
+        else:
+            prompt = build_url_prompt(content)
+        
         logger.info(f"Generated prompt for id {id}: {prompt}")
 
         # Kirim request ke OpenRouter API
