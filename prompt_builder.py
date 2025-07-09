@@ -13,6 +13,8 @@ def build_url_prompt(data: Dict[str, Any]) -> List[Dict[str, str]]:
     scripts = limit_text(data.get("scripts", []), max_len=500)
     prediction = data.get("prediction", "tidak tersedia").upper()
     confidence = round(data.get("confidence", 0) * 100, 2)
+    adjusted = round(data.get("adjusted_confidence", 0) * 100, 2)
+    final_prediction = data.get("final_prediction", "tidak tersedia").upper()
     trusted = data.get("trusted_domain", False)
     trusted_str = "YA" if trusted else "TIDAK"
 
@@ -24,30 +26,41 @@ def build_url_prompt(data: Dict[str, Any]) -> List[Dict[str, str]]:
     ).strip()
 
     return [
-        {"role": "system", 
-         "content": (
-            "Anda adalah seorang pakar keamanan siber yang ditugaskan untuk menganalisis halaman web berdasarkan "
-            "struktur HTML dan prediksi awal dari sistem deteksi phishing berbasis machine learning. "
-            "Tugas Anda adalah:\n"
-            "1. Memberikan prediksi akhir (PHISHING atau TIDAK PHISHING) dan alasan yang logis\n"
-            "2. Menyimpulkan tujuan halaman web\n"
-            "3. Menganalisis potensi phishing\n"
-            "Gunakan Bahasa Indonesia. Jawaban harus terstruktur dan profesional."
-        )},
-        {"role": "user", 
-         "content": (
-            f"Berikut adalah data yang diekstrak dari model:\n"
-            f"- Prediksi awal model: {prediction}\n"
-            f"- Confidence: {confidence}%\n\n"
-            f"- Domain terpercaya: {trusted_str}\n"
-            f"== DATA HALAMAN WEB ==\n{full_content}\n\n"
-            "Silakan berikan analisis Anda dalam format berikut:\n\n"
-            "Prediksi: [PHISHING / TIDAK PHISHING]\n\n"
-            "Alasan: \n[...]\n\n"
-            "Ringkasan Halaman:\n[...]\n\n"
-            "Analisis Phishing:\n[...]"
-        )}
+        {
+            "role": "system",
+            "content": (
+                "Anda adalah pakar keamanan siber yang menganalisis halaman web berdasarkan konten HTML "
+                "dan hasil prediksi awal dari sistem machine learning. Tugas Anda:\n"
+                "1. Menentukan apakah URL ini PHISHING atau TIDAK PHISHING.\n"
+                "2. Memberikan alasan utama (maks. 3 kalimat).\n"
+                "3. Meringkas tujuan halaman web (maks. 2 kalimat).\n"
+                "4. Menyebutkan apakah ada bagian konten mencurigakan (maks. 2 kalimat).\n"
+                "5. Jika PHISHING, berikan saran tindakan pengguna (maks. 2 kalimat).\n"
+                "Jangan gunakan istilah teknis seperti 'confidence', 'prediksi awal', atau 'akurasi model'. \n"
+                "Fokus hanya pada penjelasan konten dan ciri-ciri umum phishing.\n"
+                "Tulis jawaban Anda dalam Bahasa Indonesia, nada percaya diri, dan dalam format yang diminta."
+            )
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Data analisis URL:\n"
+                f"- Prediksi awal model: {prediction}\n"
+                f"- Confidence awal: {confidence}\n"
+                f"- Confidence setelah penyesuaian: {adjusted}\n"
+                f"- Domain terpercaya: {trusted_str}\n"
+                f"- Prediksi akhir: {final_prediction}\n\n"
+                f"- Konten yang diekstrak:\n{full_content}\n\n"
+                "Silakan berikan analisis dalam format berikut:\n\n"
+                "Prediksi: [PHISHING / TIDAK PHISHING]\n\n"
+                "Alasan:\n[...]\n\n"
+                "Ringkasan Halaman:\n[...]\n\n"
+                "Konten Mencurigakan:\n[...]\n\n"
+                "Tindakan:\n[...]"
+            )
+        }
     ]
+
 
 def build_email_prompt(data: Dict[str, Any]) -> List[Dict[str, str]]:
     prediction = data.get("prediction", "tidak tersedia").upper()
