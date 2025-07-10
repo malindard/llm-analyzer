@@ -88,9 +88,16 @@ def llm_analyze():
             logger.error(f"LLM API gagal: {response.status_code} - {response.text}")
             return jsonify({
                 "status": "error",
-                "message": f"LLM API gagal: {response.status}"
+                "message": f"LLM API gagal: {response.status_code}"
                 }), response.status_code
 
+        if response.status_code == 429:
+            rate_msg = response.json().get("error", {}).get("message", "Rate limit exceeded.")
+            return jsonify({
+                "status": "error",
+                "message": f"Rate limit LLM API tercapai: {rate_msg}"
+            }), 429
+        
         result = response.json()
         logger.info(f"LLM Response: {json.dumps(result, indent=2)}")
 
